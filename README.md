@@ -518,8 +518,8 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## 📧 Contact
 
-**Author:** Your Name  
-**Email:** your.email@example.com  
+**Author:** Mohamed Mosbah 
+**Email:** mohamedmosbah3017@gmail.com 
 **GitHub:** [@yourusername](https://github.com/yourusername)
 
 ---
