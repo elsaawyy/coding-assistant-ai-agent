@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Workspace (cloned repos)
+workspace/
+test_workspace/
+fresh_workspace/
+temp_workspace/
+
+# Cache and logs
+cache/
+logs/
+*.log
+
+# Reports (keep structure but ignore content)
+analysis_report.json
+analysis_report_summary.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment variables
+.env
+.env.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# MyPy
+.mypy_cache/

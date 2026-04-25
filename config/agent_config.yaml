@@ -1,0 +1,163 @@
+# Coding Assistant AI Agent Configuration
+# Version: 1.0.0
+
+agent:
+  name: "CodingAssistantAI"
+  version: "1.0.0"
+  description: "Autonomous code analysis and improvement agent"
+
+# Repository settings
+repository:
+  default_branch: "main"
+  clone_depth: 1  # Shallow clone
+  max_file_size_mb: 1
+  exclude_patterns:
+    - "test_*"
+    - "*_test.py"
+    - "*_tests.py"
+    - "tests/"
+    - "test/"
+    - "venv/"
+    - "env/"
+    - ".venv/"
+    - "__pycache__/"
+    - ".git/"
+    - "node_modules/"
+    - "dist/"
+    - "build/"
+    - "*.pyc"
+    - "*.pyo"
+    - "*.pyd"
+
+# Analysis settings
+analysis:
+  supported_extensions:
+    - ".py"
+  max_lines_per_file: 1000
+  min_lines_for_analysis: 3
+  ast_parsing_enabled: true
+  external_linters:
+    - "pylint"
+    - "flake8"
+  complexity_thresholds:
+    low: 5
+    medium: 10
+    high: 15
+    critical: 20
+
+# Detection rules
+detection:
+  rules:
+    long_function:
+      enabled: true
+      max_lines: 50
+      severity: "MEDIUM"
+      
+    high_complexity:
+      enabled: true
+      max_complexity: 10
+      severity: "HIGH"
+      
+    very_high_complexity:
+      enabled: true
+      max_complexity: 20
+      severity: "CRITICAL"
+      
+    no_docstring:
+      enabled: true
+      severity: "LOW"
+      
+    too_many_parameters:
+      enabled: true
+      max_parameters: 5
+      severity: "MEDIUM"
+      
+    duplicate_code:
+      enabled: true
+      min_similarity: 0.8
+      severity: "MEDIUM"
+      
+    todo_comment:
+      enabled: true
+      severity: "INFO"
+      
+    large_file:
+      enabled: true
+      max_lines: 500
+      severity: "MEDIUM"
+      
+    empty_class:
+      enabled: true
+      severity: "LOW"
+
+# Decision engine settings
+decision:
+  min_severity: 1  # 0=INFO, 1=LOW, 2=MEDIUM, 3=HIGH, 4=CRITICAL
+  max_fixes_per_run: 20
+  max_actions_per_file: 10
+  max_retries: 3
+  confidence_threshold: 0.7
+  
+  # Priority scoring weights
+  priority_weights:
+    severity: 25
+    file_importance: 4
+    retry_penalty: 5
+    success_bonus: 10
+    fix_limit_penalty: 10
+
+# Fix strategies
+fix_strategies:
+  auto_fix:
+    - "add_docstring"
+    - "simple_refactor"
+    - "extract_method"
+    
+  manual_review:
+    - "security_issue"
+    - "architecture_change"
+    - "complex_refactor"
+    
+  skip:
+    - "third_party_issue"
+    - "legacy_code"
+
+# Validation settings
+validation:
+  run_syntax_check: true
+  run_tests: false
+  run_linter: false
+  timeout_seconds: 30
+  require_all_tests_pass: true
+  
+# Reporting settings
+reporting:
+  output_format: "json"  # json, html, markdown
+  include_suggestions: true
+  include_fix_details: true
+  include_metrics: true
+  max_issues_per_type: 100
+  
+# Logging settings
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/agent.log"
+  console: true
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Performance settings
+performance:
+  parallel_analysis: false
+  max_workers: 4
+  cache_analysis: true
+  cache_dir: "./cache"
+  cleanup_workspace: false
+
+# LLM settings (for future enhancement)
+llm:
+  enabled: false
+  provider: "openai"  # openai, anthropic, local
+  model: "gpt-3.5-turbo"
+  max_tokens: 1000
+  temperature: 0.3
+  api_key_env: "OPENAI_API_KEY"

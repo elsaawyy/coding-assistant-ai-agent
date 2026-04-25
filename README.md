@@ -525,5 +525,5 @@ This project is licensed under the [MIT License](LICENSE).
 ---
 
 <div align="center">
-  <sub>Built with ❤️ by the Coding Assistant Team</sub>
+  <sub>Built with ❤️ by Mohamed Elsawy ;)</sub>
 </div>
