@@ -1,0 +1,393 @@
+[1mdiff --git a/src/agents/core_agent.py b/src/agents/core_agent.py[m
+[1mindex 4485b1a..8739e5a 100644[m
+[1m--- a/src/agents/core_agent.py[m
+[1m+++ b/src/agents/core_agent.py[m
+[36m@@ -18,6 +18,14 @@[m [mfrom src.analyzers.code_analyzer import PythonAnalyzer[m
+ from src.detectors.issue_detector import IssueDetector, Severity[m
+ from src.agents.decision_engine import DecisionEngine, Action, ActionType, FixStrategy[m
+ [m
+[32m+[m[32m# Try to import fix generator[m
+[32m+[m[32mtry:[m
+[32m+[m[32m    from src.generators.fix_generator import FixGenerator[m
+[32m+[m[32m    HAS_FIX_GENERATOR = True[m
+[32m+[m[32mexcept ImportError:[m
+[32m+[m[32m    HAS_FIX_GENERATOR = False[m
+[32m+[m[32m    print("⚠️ FixGenerator not available, using simple fixes")[m
+[32m+[m
+ [m
+ @dataclass[m
+ class AgentState:[m
+[36m@@ -43,10 +51,15 @@[m [mclass CodingAssistantAgent:[m
+         self.analyzer = PythonAnalyzer()[m
+         self.detector = IssueDetector()[m
+         self.decision_engine = DecisionEngine(config)[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Initialize fix generator if available[m
+[32m+[m[32m        self.fix_generator = FixGenerator() if HAS_FIX_GENERATOR else None[m
+[32m+[m[41m        [m
+         self.state = AgentState()[m
+         self.analysis_results = [][m
+         self.all_issues = [][m
+         self.applied_fixes = [][m
+[32m+[m[32m        self.failed_fixes = [][m
+         self.dry_run = config.get('dry_run', False)[m
+         [m
+     async def run(self, repo_url: str) -> Dict[str, Any]:[m
+[36m@@ -55,6 +68,9 @@[m [mclass CodingAssistantAgent:[m
+         print("=" * 60)[m
+         print(f"Repository: {repo_url}")[m
+         [m
+[32m+[m[32m        if self.dry_run:[m
+[32m+[m[32m            print("⚠️ DRY RUN MODE - No fixes will be applied")[m
+[32m+[m[41m        [m
+         # Load repository[m
+         repo_path = self.repo_loader.clone_repository(RepoConfig(url=repo_url))[m
+         [m
+[36m@@ -85,8 +101,11 @@[m [mclass CodingAssistantAgent:[m
+             [m
+             if not issues:[m
+                 print(f"✅ No issues found")[m
+[32m+[m[32m                self.state.files_processed += 1[m
+                 return[m
+             [m
+[32m+[m[32m            self.state.files_with_issues += 1[m
+[32m+[m[41m            [m
+             # Print summary[m
+             severity_counts = {}[m
+             for issue in issues:[m
+[36m@@ -99,8 +118,8 @@[m [mclass CodingAssistantAgent:[m
+             # Get decisions[m
+             actions = self.decision_engine.prioritize_issues(issues, str(file_path))[m
+             [m
+[31m-            # Process actions (no recording in dry run)[m
+[31m-            for action in actions[:3]:  # Limit to 3 per file[m
+[32m+[m[32m            # Process actions[m
+[32m+[m[32m            for action in actions[:5]:  # Limit per file[m
+                 if action.type == ActionType.FIX:[m
+                     if self.dry_run:[m
+                         print(f"  🔍 [DRY RUN] Would fix: {action.issue.message}")[m
+[36m@@ -117,50 +136,79 @@[m [mclass CodingAssistantAgent:[m
+         self.state.files_processed += 1[m
+     [m
+     async def _apply_fix(self, action: Action, file_path: Path) -> bool:[m
+[32m+[m[32m        """Apply a fix to the code"""[m
+         print(f"  🔧 Fixing: {action.issue.message}")[m
+[32m+[m[32m        print(f"     Strategy: {action.strategy.value}")[m
+         [m
+         try:[m
+             with open(file_path, 'r', encoding='utf-8') as f:[m
+                 content = f.read()[m
+             [m
+[31m-            # Simple fix for docstrings[m
+[31m-            if action.strategy == FixStrategy.ADD_DOCSTRING:[m
+[31m-                lines = content.split('\n')[m
+[31m-                line_idx = action.issue.line - 1[m
+[31m-                [m
+[31m-                if 0 <= line_idx < len(lines):[m
+[31m-                    indent = len(lines[line_idx]) - len(lines[line_idx].lstrip())[m
+[31m-                    spaces = ' ' * (indent + 4)[m
+[31m-                    func_name = action.issue.context.get('function', 'function')[m
+[31m-                    docstring = f'{spaces}"""TODO: Add documentation for {func_name}."""'[m
+[31m-                    lines.insert(line_idx + 1, docstring)[m
+[31m-                    fixed_content = '\n'.join(lines)[m
+[31m-                    [m
+[31m-                    # Validate[m
+[31m-                    try:[m
+[31m-                        import ast[m
+[31m-                        ast.parse(fixed_content)[m
+[31m-                        [m
+[31m-                        with open(file_path, 'w', encoding='utf-8') as f:[m
+[31m-                            f.write(fixed_content)[m
+[31m-                        [m
+[31m-                        print(f"  ✅ Fix applied")[m
+[31m-                        self.state.fixes_applied += 1[m
+[31m-                        return True[m
+[31m-                    except SyntaxError:[m
+[31m-                        print(f"  ❌ Invalid syntax")[m
+[31m-                        self.state.fixes_failed += 1[m
+[31m-                        return False[m
+[31m-            [m
+[31m-            print(f"  ⏭️ No fix strategy available")[m
+[31m-            self.state.fixes_skipped += 1[m
+[31m-            return False[m
+[32m+[m[32m            fixed_content = None[m
+[32m+[m[41m            [m
+[32m+[m[32m            # Try fix generator first[m
+[32m+[m[32m            if self.fix_generator:[m
+[32m+[m[32m                fixed_content = await self.fix_generator.generate_fix([m
+[32m+[m[32m                    file_path, action.issue, action.strategy.value[m
+[32m+[m[32m                )[m
+[32m+[m[41m            [m
+[32m+[m[32m            # Fallback to simple fixes[m
+[32m+[m[32m            if not fixed_content:[m
+[32m+[m[32m                fixed_content = self._simple_fix(content, action)[m
+[32m+[m[41m            [m
+[32m+[m[32m            if not fixed_content or fixed_content == content:[m
+[32m+[m[32m                print(f"     ❌ Could not generate fix")[m
+[32m+[m[32m                self.state.fixes_failed += 1[m
+[32m+[m[32m                return False[m
+[32m+[m[41m            [m
+[32m+[m[32m            # Validate syntax[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                import ast[m
+[32m+[m[32m                ast.parse(fixed_content)[m
+[32m+[m[32m            except SyntaxError as e:[m
+[32m+[m[32m                print(f"     ❌ Invalid syntax: {e}")[m
+[32m+[m[32m                self.state.fixes_failed += 1[m
+[32m+[m[32m                return False[m
+[32m+[m[41m            [m
+[32m+[m[32m            # Create backup[m
+[32m+[m[32m            backup_path = file_path.with_suffix('.py.bak')[m
+[32m+[m[32m            with open(backup_path, 'w', encoding='utf-8') as f:[m
+[32m+[m[32m                f.write(content)[m
+[32m+[m[41m            [m
+[32m+[m[32m            # Apply fix[m
+[32m+[m[32m            with open(file_path, 'w', encoding='utf-8') as f:[m
+[32m+[m[32m                f.write(fixed_content)[m
+[32m+[m[41m            [m
+[32m+[m[32m            print(f"     ✅ Fix applied (backup: {backup_path.name})")[m
+[32m+[m[32m            self.state.fixes_applied += 1[m
+[32m+[m[32m            return True[m
+             [m
+         except Exception as e:[m
+[31m-            print(f"  ❌ Error: {e}")[m
+[32m+[m[32m            print(f"     ❌ Error: {e}")[m
+             self.state.fixes_failed += 1[m
+             return False[m
+     [m
+[32m+[m[32m    def _simple_fix(self, content: str, action: Action) -> str:[m
+[32m+[m[32m        """Simple built-in fixes"""[m
+[32m+[m[32m        lines = content.split('\n')[m
+[32m+[m[32m        line_idx = action.issue.line - 1[m
+[32m+[m[41m        [m
+[32m+[m[32m        if line_idx < 0 or line_idx >= len(lines):[m
+[32m+[m[32m            return None[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Add docstring[m
+[32m+[m[32m        if action.strategy == FixStrategy.ADD_DOCSTRING:[m
+[32m+[m[32m            func_line = lines[line_idx][m
+[32m+[m[32m            indent = len(func_line) - len(func_line.lstrip())[m
+[32m+[m[32m            spaces = ' ' * (indent + 4)[m
+[32m+[m[41m            [m
+[32m+[m[32m            func_name = action.issue.context.get('function', 'function')[m
+[32m+[m[32m            docstring = f'{spaces}"""TODO: Add documentation for {func_name}."""'[m
+[32m+[m[32m            lines.insert(line_idx + 1, docstring)[m
+[32m+[m[32m            return '\n'.join(lines)[m
+[32m+[m[41m        [m
+[32m+[m[32m        return None[m
+[32m+[m[41m    [m
+     def _generate_report(self) -> Dict[str, Any]:[m
+         print("\n" + "=" * 60)[m
+         print("📊 FINAL REPORT")[m
+[36m@@ -175,6 +223,7 @@[m [mclass CodingAssistantAgent:[m
+         [m
+         print(f"\n📈 Statistics:")[m
+         print(f"  • Files analyzed: {self.state.files_processed}")[m
+[32m+[m[32m        print(f"  • Files with issues: {self.state.files_with_issues}")[m
+         print(f"  • Total issues: {self.state.total_issues_found}")[m
+         print(f"  • Fixes applied: {self.state.fixes_applied}")[m
+         print(f"  • Fixes failed: {self.state.fixes_failed}")[m
+[36m@@ -192,8 +241,13 @@[m [mclass CodingAssistantAgent:[m
+         return {[m
+             'summary': {[m
+                 'files_analyzed': self.state.files_processed,[m
+[32m+[m[32m                'files_with_issues': self.state.files_with_issues,[m
+                 'total_issues': self.state.total_issues_found,[m
+                 'fixes_applied': self.state.fixes_applied,[m
+[32m+[m[32m                'fixes_failed': self.state.fixes_failed,[m
+[32m+[m[32m                'fixes_skipped': self.state.fixes_skipped,[m
+[32m+[m[32m                'success_rate': self.state.fixes_applied / (self.state.fixes_applied + self.state.fixes_failed) if (self.state.fixes_applied + self.state.fixes_failed) > 0 else 0,[m
+[32m+[m[32m                'elapsed_time_seconds': self.state.elapsed_time,[m
+                 'severity_breakdown': severity_breakdown,[m
+                 'issue_type_breakdown': issue_type_breakdown[m
+             }[m
+[1mdiff --git a/src/generators/fix_generator.py b/src/generators/fix_generator.py[m
+[1mindex 49352be..68f40b1 100644[m
+[1m--- a/src/generators/fix_generator.py[m
+[1m+++ b/src/generators/fix_generator.py[m
+[36m@@ -1,74 +1,204 @@[m
+[31m-"""Intelligent fix generation using AST manipulation and LLM"""[m
+[32m+[m[32m"""Fix generator for all issue types"""[m
+ [m
+[31m-import ast[m
+ import re[m
+[31m-from typing import Optional, Dict, Any[m
+[32m+[m[32mimport ast[m
+ from pathlib import Path[m
+[32m+[m[32mfrom typing import Optional, List, Tuple[m
+ [m
+ class FixGenerator:[m
+[31m-    """Generate fixes for detected issues"""[m
+[32m+[m[32m    """Generate fixes for all detected issues"""[m
+     [m
+[31m-    def __init__(self, use_llm: bool = False):[m
+[31m-        self.use_llm = use_llm[m
+[32m+[m[32m    def __init__(self):[m
+         self.fix_count = 0[m
+[31m-        [m
+[32m+[m[32m        self.fix_stats = {[m
+[32m+[m[32m            'docstring_added': 0,[m
+[32m+[m[32m            'complexity_reduced': 0,[m
+[32m+[m[32m            'split_suggested': 0[m
+[32m+[m[32m        }[m
+[32m+[m[41m    [m
+     async def generate_fix(self, file_path: Path, issue, strategy: str) -> Optional[str]:[m
+         """Generate a fix based on strategy"""[m
+         [m
+         with open(file_path, 'r', encoding='utf-8') as f:[m
+[31m-            original_code = f.read()[m
+[32m+[m[32m            content = f.read()[m
+[32m+[m[41m        [m
+[32m+[m[32m        lines = content.split('\n')[m
+[32m+[m[32m        line_idx = issue.line - 1[m
+[32m+[m[41m        [m
+[32m+[m[32m        if line_idx < 0 or line_idx >= len(lines):[m
+[32m+[m[32m            return None[m
+         [m
+[32m+[m[32m        # Handle different fix strategies[m
+         if strategy == 'add_docstring':[m
+[31m-            return self._add_docstring(original_code, issue)[m
+[32m+[m[32m            return self._add_docstring(lines, line_idx, issue)[m
+         [m
+         elif strategy == 'simplify_logic':[m
+[31m-            return await self._simplify_complexity(original_code, issue)[m
+[32m+[m[32m            return self._simplify_nested_logic(content, issue)[m
+         [m
+         elif strategy == 'split_function':[m
+[31m-            return self._split_long_function(original_code, issue)[m
+[32m+[m[32m            return self._add_split_comment(lines, line_idx, issue)[m
+         [m
+         elif strategy == 'extract_method':[m
+[31m-            return self._extract_duplicate_code(original_code, issue)[m
+[32m+[m[32m            return self._suggest_extraction(lines, line_idx, issue)[m
+[32m+[m[41m        [m
+[32m+[m[32m        elif strategy == 'manual_review':[m
+[32m+[m[32m            return self._add_review_comment(lines, line_idx, issue)[m
+         [m
+         return None[m
+     [m
+[31m-    def _add_docstring(self, code: str, issue) -> str:[m
+[32m+[m[32m    def _add_docstring(self, lines: List[str], line_idx: int, issue) -> Optional[str]:[m
+         """Add docstring to function"""[m
+[31m-        lines = code.split('\n')[m
+[31m-        func_line = issue.line - 1[m
+[32m+[m[32m        func_line = lines[line_idx][m
+[32m+[m[41m        [m
+[32m+[m[32m        # Skip if already has docstring[m
+[32m+[m[32m        if line_idx + 1 < len(lines) and '"""' in lines[line_idx + 1]:[m
+[32m+[m[32m            return None[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Get function name[m
+[32m+[m[32m        func_match = re.search(r'def\s+(\w+)', func_line)[m
+[32m+[m[32m        func_name = func_match.group(1) if func_match else 'function'[m
+         [m
+[31m-        # Find indentation[m
+[31m-        if func_line < len(lines):[m
+[31m-            indent = len(lines[func_line]) - len(lines[func_line].lstrip())[m
+[32m+[m[32m        # Calculate indentation[m
+[32m+[m[32m        indent = len(func_line) - len(func_line.lstrip())[m
+[32m+[m[32m        spaces = ' ' * (indent + 4)[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Create docstring[m
+[32m+[m[32m        docstring = f'{spaces}"""TODO: Add documentation for {func_name}.'[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Add parameter info if available[m
+[32m+[m[32m        param_match = re.search(r'\((.*?)\)', func_line)[m
+[32m+[m[32m        if param_match and param_match.group(1):[m
+[32m+[m[32m            params = [p.strip().split(':')[0].split('=')[0].strip()[m[41m [m
+[32m+[m[32m                     for p in param_match.group(1).split(',')][m
+[32m+[m[32m            params = [p for p in params if p and p not in ['self', 'cls']][m
+[32m+[m[41m            [m
+[32m+[m[32m            if params:[m
+[32m+[m[32m                docstring += f'\n{spaces}    \n{spaces}    Args:'[m
+[32m+[m[32m                for param in params[:3]:  # Limit to 3 params[m
+[32m+[m[32m                    docstring += f'\n{spaces}        {param}: TODO'[m
+[32m+[m[41m        [m
+[32m+[m[32m        docstring += f'\n{spaces}    \n{spaces}    Returns: TODO'[m
+[32m+[m[32m        docstring += '\n{spaces}"""'[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Insert docstring[m
+[32m+[m[32m        lines.insert(line_idx + 1, docstring)[m
+[32m+[m[32m        self.fix_stats['docstring_added'] += 1[m
+[32m+[m[32m        return '\n'.join(lines)[m
+[32m+[m[41m    [m
+[32m+[m[32m    def _simplify_nested_logic(self, content: str, issue) -> Optional[str]:[m
+[32m+[m[32m        """Simplify nested if statements"""[m
+[32m+[m[32m        original = content[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Pattern 1: Nested ifs[m
+[32m+[m[32m        # if condition1:\n    if condition2:[m
+[32m+[m[32m        pattern1 = r'(\s+)if\s+(.*?):\s*\n\s+\1\s+if\s+(.*?):'[m
+[32m+[m[32m        replacement1 = r'\1if \2 and \3:'[m
+[32m+[m[41m        [m
+[32m+[m[32m        fixed = re.sub(pattern1, replacement1, content)[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Pattern 2: if condition: return True else: return False[m
+[32m+[m[32m        pattern2 = r'if\s+(.*?):\s*\n\s+return\s+True\s*\n\s*else:\s*\n\s+return\s+False'[m
+[32m+[m[32m        replacement2 = r'return \1'[m
+[32m+[m[41m        [m
+[32m+[m[32m        fixed = re.sub(pattern2, replacement2, fixed, flags=re.DOTALL)[m
+[32m+[m[41m        [m
+[32m+[m[32m        if fixed != content:[m
+[32m+[m[32m            self.fix_stats['complexity_reduced'] += 1[m
+[32m+[m[32m            return fixed[m
+[32m+[m[41m        [m
+[32m+[m[32m        return None[m
+[32m+[m[41m    [m
+[32m+[m[32m    def _add_split_comment(self, lines: List[str], line_idx: int, issue) -> Optional[str]:[m
+[32m+[m[32m        """Add comment suggesting function split"""[m
+[32m+[m[32m        func_line = lines[line_idx][m
+[32m+[m[32m        func_match = re.search(r'def\s+(\w+)', func_line)[m
+[32m+[m[41m        [m
+[32m+[m[32m        if not func_match:[m
+[32m+[m[32m            return None[m
+[32m+[m[41m        [m
+[32m+[m[32m        func_name = func_match.group(1)[m
+[32m+[m[32m        indent = len(func_line) - len(func_line.lstrip())[m
+[32m+[m[32m        spaces = ' ' * (indent + 4)[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Find function end[m
+[32m+[m[32m        end_idx = self._find_function_end(lines, line_idx + 1)[m
+[32m+[m[32m        line_count = end_idx - line_idx[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Add suggestion comment[m
+[32m+[m[32m        comment = f'{spaces}# TODO: This function is too long ({line_count} lines).'[m
+[32m+[m[32m        comment += f'\n{spaces}# Consider extracting logical blocks into separate functions:'[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Find logical blocks[m
+[32m+[m[32m        blocks = self._find_logical_blocks(lines[line_idx + 1:end_idx], indent + 4)[m
+[32m+[m[32m        for i, block_start in enumerate(blocks[:3]):[m
+[32m+[m[32m            comment += f'\n{spaces}#   - _extract_{func_name}_part_{i+1}()  (line {line_idx + 2 + block_start})'[m
+[32m+[m[41m        [m
+[32m+[m[32m        lines.insert(line_idx + 2, comment)[m
+[32m+[m[32m        self.fix_stats['split_suggested'] += 1[m
+[32m+[m[32m        return '\n'.join(lines)[m
+[32m+[m[41m    [m
+[32m+[m[32m    def _suggest_extraction(self, lines: List[str], line_idx: int, issue) -> Optional[str]:[m
+[32m+[m[32m        """Suggest extracting a method"""[m
+[32m+[m[32m        param_match = re.search(r'def\s+(\w+)\((.*?)\)', lines[line_idx])[m
+[32m+[m[41m        [m
+[32m+[m[32m        if param_match:[m
+[32m+[m[32m            func_name = param_match.group(1)[m
+[32m+[m[32m            params = param_match.group(2)[m
+[32m+[m[41m            [m
+[32m+[m[32m            indent = len(lines[line_idx]) - len(lines[line_idx].lstrip())[m
+             spaces = ' ' * (indent + 4)[m
+             [m
+[31m-            # Generate docstring[m
+[31m-            func_name = issue.context.get('function', 'function')[m
+[31m-            docstring = f'{spaces}"""{func_name} function.\n{spaces}    \n{spaces}    TODO: Add detailed documentation."""'[m
+[32m+[m[32m            comment = f'{spaces}# TODO: Too many parameters ({len(params.split(",")) if params else 0})'[m
+[32m+[m[32m            comment += f'\n{spaces}# Consider using a configuration object or splitting the function'[m
+             [m
+[31m-            lines.insert(func_line + 1, docstring)[m
+[32m+[m[32m            lines.insert(line_idx + 1, comment)[m
+             return '\n'.join(lines)[m
+         [m
+[31m-        return code[m
+[31m-    [m
+[31m-    async def _simplify_complexity(self, code: str, issue) -> Optional[str]:[m
+[31m-        """Simplify complex function logic"""[m
+[31m-        # This would use LLM or sophisticated AST rewriting[m
+[31m-        if self.use_llm:[m
+[31m-            return await self._call_ll

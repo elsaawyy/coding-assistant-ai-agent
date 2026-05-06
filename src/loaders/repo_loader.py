@@ -1,5 +1,7 @@
 import os
 import shutil
+import subprocess
+import time
 from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass
@@ -28,27 +30,56 @@ class RepositoryLoader:
         self.exclude_patterns = []
         
     def clone_repository(self, config: RepoConfig) -> Path:
-        """Clone GitHub repository"""
+        """Clone GitHub repository without unsafe options"""
         repo_name = config.url.split('/')[-1].replace('.git', '')
         repo_path = self.working_dir / repo_name
         
+        # Safer removal for Windows
         if repo_path.exists():
             print(f"Removing existing directory: {repo_path}")
-            shutil.rmtree(repo_path)
-            
+            for attempt in range(3):
+                try:
+                    shutil.rmtree(repo_path, ignore_errors=False)
+                    break
+                except PermissionError:
+                    print(f"  Attempt {attempt + 1}: Permission denied, waiting...")
+                    time.sleep(2)
+                except Exception as e:
+                    print(f"  Attempt {attempt + 1}: {e}")
+                    time.sleep(1)
+            else:
+                # Force removal with Windows command
+                try:
+                    subprocess.run(['cmd', '/c', 'rmdir', '/s', '/q', str(repo_path)], 
+                                 capture_output=True, timeout=30)
+                except:
+                    pass
+                time.sleep(1)
+        
+        # Ensure parent directory exists
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        
         print(f"Cloning {config.url}...")
         try:
+            # Simple clone without any extra config options
             repo = git.Repo.clone_from(
                 config.url, 
                 repo_path,
-                branch=config.branch,
                 depth=1  # Shallow clone for efficiency
             )
             print(f"Successfully cloned to {repo_path}")
             return repo_path
         except Exception as e:
             print(f"Error cloning repository: {e}")
-            raise
+            # Try alternative method without depth
+            try:
+                print("Retrying without depth limit...")
+                repo = git.Repo.clone_from(config.url, repo_path)
+                print(f"Successfully cloned to {repo_path}")
+                return repo_path
+            except Exception as e2:
+                print(f"Alternative clone also failed: {e2}")
+                raise
     
     def get_source_files(self, repo_path: Path, extensions: List[str]) -> List[Path]:
         """Get all source files with given extensions"""
@@ -75,7 +106,10 @@ class RepositoryLoader:
                 return False
                 
         # Skip very large files (over 1MB)
-        if file_path.stat().st_size > 1024 * 1024:
-            return False
+        try:
+            if file_path.stat().st_size > 1024 * 1024:
+                return False
+        except:
+            pass
             
         return True
